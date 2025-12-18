@@ -10,6 +10,8 @@ from pathlib import Path
 from scipy import stats
 import laspy
 
+# Fix for OverflowError in Agg backend with large datasets
+plt.rcParams['agg.path.chunksize'] = 10000
 
 def plot_bd_profile(profile_csv, output_file, cbh=None, threshold_abs=0.02, threshold_rel_pct=10):
     """
@@ -26,6 +28,14 @@ def plot_bd_profile(profile_csv, output_file, cbh=None, threshold_abs=0.02, thre
     
     # Read the profile data
     profile_df = pd.read_csv(profile_csv)
+    
+    # FIX: If the CSV contains point-level data (many rows), aggregate it back to a profile
+    # We want unique Height (H) vs CBD pairs, sorted by Height
+    if 'H' in profile_df.columns and 'CBD' in profile_df.columns:
+        # Drop duplicates to get one row per height bin
+        profile_df = profile_df[['H', 'CBD']].drop_duplicates()
+        # Sort by Height to ensure the line is drawn sequentially
+        profile_df = profile_df.sort_values('H')
     
     # Calculate thresholds
     max_cbd = profile_df['CBD'].max()
@@ -153,5 +163,10 @@ if __name__ == '__main__':
             
         metrics_csv = results_dir / 'all_metrics.csv'
     x = input("Give file path to .laz to 3d render:")
-    las = laspy.read(x)
-    create_3d_scatter_plot(las)
+    try:
+        las = laspy.read(x)
+        create_3d_scatter_plot(las)
+    except Exception as e:
+        print(f"Error reading {x}. Please check the file path.")
+        sys.exit(1)
+

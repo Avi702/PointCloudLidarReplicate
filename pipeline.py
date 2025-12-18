@@ -23,13 +23,12 @@ data_table = importr('data.table')
 ggthemes = importr('ggthemes')
 gridExtra = importr('gridExtra')
 
-print("Loading LidarForFuel functions...")
-ro.r('source("/Users/avnee/LiDAR/LidarReplicate/CBD.R")')
-ro.r('source("/Users/avnee/LiDAR/LidarReplicate/fPCpretreatment.R")')
-# ro.r('source("/Users/avnee/LiDAR/LidarForFuel/R/ffuelmetrics.R")') # Not using this one
 
-print("Available functions:")
-ro.r('print(ls())')
+ro.r('source("/Users/avnee/LiDAR/PointCloudLidarReplicate/CBD.R")')
+ro.r('source("/Users/avnee/LiDAR/PointCloudLidarReplicate/ffuelmetrics.R")')
+ro.r('source("/Users/avnee/LiDAR/PointCloudLidarReplicate/fPCpretreatment.R")')
+
+
 
 
 fPCpretreatment = ro.r['fPCpretreatment']
