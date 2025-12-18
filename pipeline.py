@@ -142,6 +142,7 @@ def calculate_metrics(las, **kwargs):
             except:
                 metrics[name] = None
     
+    # Return both the metrics dictionary and the profile dataframe
     profile_df = pd.DataFrame()
     if profile_r is not ro.NULL:
         try:
@@ -215,7 +216,7 @@ def calculate_metrics(las, **kwargs):
         except Exception as e:
             print(f"    Warning: Could not map metrics to points: {e}")
 
-    return profile_df
+    return profile_df, metrics
 
 
 
@@ -234,6 +235,7 @@ def run_pipeline(laz_files, output_dir='results', pixel_resolution=10.0, **kwarg
     output_path.mkdir(parents=True, exist_ok=True)
     
     all_profiles = []
+    all_metrics = []
     all_filenames = []
     
     for i, laz_file in enumerate(laz_files, 1):
@@ -254,13 +256,17 @@ def run_pipeline(laz_files, output_dir='results', pixel_resolution=10.0, **kwarg
                 continue
             
             print("  Calculating metrics...")
-            profile = calculate_metrics(las_processed, **kwargs)
+            profile, metrics = calculate_metrics(las_processed, **kwargs)
 
             # Save individual profile CSV immediately
             csv_name = filename.replace('.laz', '_profile.csv')
             csv_path = output_path / csv_name
             profile.to_csv(csv_path, index=False)
             print(f"    Saved profile to: {csv_name}")
+
+            # Add filename to metrics and store
+            metrics['filename'] = filename
+            all_metrics.append(metrics)
 
             all_profiles.append(profile)
             all_filenames.append(filename)
@@ -269,6 +275,13 @@ def run_pipeline(laz_files, output_dir='results', pixel_resolution=10.0, **kwarg
             print(f"  Error: {e}\n")
             continue
     
+    # Save all metrics to a single CSV file
+    if all_metrics:
+        metrics_df = pd.DataFrame(all_metrics)
+        metrics_path = output_path / 'all_metrics.csv'
+        metrics_df.to_csv(metrics_path, index=False)
+        print(f"  Saved aggregated metrics to: {metrics_path.name}")
+
     print("=" * 70)
     print("COMPLETE")
     print("=" * 70)

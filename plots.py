@@ -65,8 +65,8 @@ def plot_bd_profile(profile_csv, output_file, cbh=None, threshold_abs=0.02, thre
     plt.axvline(x=threshold_rel, color='orange', linestyle='--', linewidth=2, 
                 label=f'Relative Threshold ({threshold_rel_pct}% of max = {threshold_rel:.3f} kg/m³)', zorder=3)
     
-    # Add horizontal line at CBH if available (even if it's 0)
-    if cbh is not None and cbh >= 0:
+    # Add horizontal line at CBH
+    if cbh is not None and not pd.isna(cbh):
         plt.axhline(y=cbh, color='green', linestyle='-', linewidth=2, 
                     label=f'Canopy Base Height (CBH = {cbh:.2f} m)', zorder=4)
     
@@ -81,7 +81,7 @@ def plot_bd_profile(profile_csv, output_file, cbh=None, threshold_abs=0.02, thre
     plt.xlim(0, max(profile_df['CBD'].max() * 1.1, threshold_abs * 1.5))
     plt.ylim(0, profile_df['H'].max() * 1.05)
     
-    # Save the plot
+ 
     plt.tight_layout()
     plt.savefig(output_file, dpi=300, bbox_inches='tight')
     print(f"Saved: {output_file}")

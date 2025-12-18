@@ -3,13 +3,18 @@ Usage: Python or python3 2dplot.py <file1.csv> [file2.csv ...]
 """
 import pandas as pd
 import matplotlib.pyplot as plt
+import matplotlib.colors as mcolors
+from matplotlib.patches import Patch
 import numpy as np
 import sys
+from pathlib import Path
+
 def create_2dplot_cbd(csv_path):
     print(f"Loading data from: {csv_path}")
     
 
     df = pd.read_csv(csv_path)
+    df.columns = df.columns.str.strip()
     
     df_clean = df.dropna(subset=['X', 'Y', 'CBD'])
     
@@ -23,21 +28,22 @@ def create_2dplot_cbd(csv_path):
     # Convert to numpy array
     cbd_array = np.array(raw_cbd)
     
-    # Multiply by 100 to handle small numbers
-    cbd_scaled = cbd_array * 100.0
+    # Define a continuous colormap from Green -> Yellow -> Red
+    # Values < 0.01 will be Green
+    # Values > 0.10 will be Red
     
-    # Min-Max Normalization (0 to 1)
-    # Formula: (value - min) / (max - min)
-    min_val = np.min(cbd_scaled)
-    max_val = np.max(cbd_scaled)
+    # Create a custom continuous colormap
+    colors = ["green", "yellow", "red"]
+    # Define the positions for these colors (0.0 to 1.0 range)
+    cmap = mcolors.LinearSegmentedColormap.from_list("fire_risk", colors)
     
-    print(f"Scaled CBD Range: {min_val:.4f} to {max_val:.4f}")
+    # Set the normalization range for the colormap
+    # vmin=0.01 (start of yellow transition)
+    # vmax=0.10 (start of pure red)
+    # This means anything < 0.01 is green, anything > 0.10 is red
+    norm = plt.Normalize(vmin=0.01, vmax=0.10)
     
-    if max_val > min_val:
-        cbd_normalized = (cbd_scaled - min_val) / (max_val - min_val)
-    else:
-        # If all values are the same (e.g., all 0), set to 0
-        cbd_normalized = np.zeros_like(cbd_scaled)
+    print(f"CBD Range: {np.min(cbd_array):.4f} to {np.max(cbd_array):.4f}")
         
     # 4. Graph the results
     # Center the coordinates
@@ -46,29 +52,64 @@ def create_2dplot_cbd(csv_path):
     x_plot = np.array(x_coords) - x_center
     y_plot = np.array(y_coords) - y_center
     
-    # Sort points so high values (Red) are drawn on top of low values (Green)
-    sort_indices = np.argsort(cbd_normalized)
+    # Sort points so high values are drawn on top
+    sort_indices = np.argsort(cbd_array)
     x_sorted = x_plot[sort_indices]
     y_sorted = y_plot[sort_indices]
-    c_sorted = cbd_normalized[sort_indices]
+    c_sorted = cbd_array[sort_indices]
     
     # Create the plot
     fig, ax = plt.subplots(figsize=(12, 10))
     
-    scatter = ax.scatter(x_sorted, y_sorted, c=c_sorted, s=2, cmap='RdYlGn_r', alpha=1.0)
+    scatter = ax.scatter(x_sorted, y_sorted, c=c_sorted, s=2, cmap=cmap, norm=norm, alpha=1.0)
     
+    # Add a continuous colorbar
     cbar = plt.colorbar(scatter, ax=ax)
-    cbar.set_label('Normalized Canopy Bulk Density (0-1)')
+    cbar.set_label('Canopy Bulk Density (kg/m³)')
     
-    ax.set_title(f"2D Fuel Density Map\n(n={len(x_sorted):,})")
+    # Add text annotations for the risk zones on the colorbar
+    # We can't easily add text *inside* the colorbar, but we can add a legend describing the ranges
+    legend_elements = [
+        Patch(facecolor='green', edgecolor='black', label='< 0.01: Gap / Air (Fire cannot climb)'),
+        Patch(facecolor='yellow', edgecolor='black', label='0.01 - 0.05: Sparse Canopy'),
+        Patch(facecolor='orange', edgecolor='black', label='0.05 - 0.10: Moderate Canopy'),
+        Patch(facecolor='red', edgecolor='black', label='> 0.10: Dense Canopy (High Risk)')
+    ]
+    
+    ax.legend(handles=legend_elements, loc='upper right', title="Fire Risk Thresholds", fontsize=10)
+    
+    ax.set_title(f"2D Fuel Density Map (Continuous)\n(n={len(x_sorted):,})")
     ax.set_xlabel('X (meters from center)')
     ax.set_ylabel('Y (meters from center)')
     ax.set_aspect('equal')
     ax.grid(True, alpha=0.3)
     
     plt.tight_layout()
-    plt.show()
+    
 
-input_csv = laz_files = sys.argv[1:]
-for csv_file in laz_files:
-    create_2dplot_cbd(csv_file)
+    results_dir = Path('results')
+    plots_dir = results_dir / 'plots'
+    plots_dir.mkdir(parents=True, exist_ok=True)
+    
+    stem = Path(csv_path).stem
+    output_file = plots_dir / f"{stem}_2d_plot.png"
+    plt.savefig(output_file, dpi=300, bbox_inches='tight')
+    print(f"Saved plot to: {output_file}")
+    
+
+if __name__ == "__main__":
+    if len(sys.argv) > 1:
+        laz_files = sys.argv[1:]
+    else:
+        print("No files provided. Searching for *_profile.csv in results/...")
+        results_dir = Path('results')
+        if results_dir.exists():
+            laz_files = list(results_dir.glob('*_profile.csv'))
+            if not laz_files:
+                print("No profile CSV files found in results/.")
+        else:
+            print("Results directory not found.")
+            laz_files = []
+
+    for csv_file in laz_files:
+        create_2dplot_cbd(str(csv_file))
