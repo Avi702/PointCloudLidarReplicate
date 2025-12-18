@@ -1,7 +1,10 @@
+"""
+Usage: Python or python3 2dplot.py <file1.csv> [file2.csv ...]
+"""
 import pandas as pd
 import matplotlib.pyplot as plt
 import numpy as np
-
+import sys
 def create_2dplot_cbd(csv_path):
     print(f"Loading data from: {csv_path}")
     
@@ -66,5 +69,6 @@ def create_2dplot_cbd(csv_path):
     plt.tight_layout()
     plt.show()
 
-input_csv = "/Users/avnee/LiDAR/LidarReplicate/results/NEON_4_combined.csv"
-create_2dplot_cbd(input_csv)
+input_csv = laz_files = sys.argv[1:]
+for csv_file in laz_files:
+    create_2dplot_cbd(csv_file)

@@ -1,6 +1,7 @@
 """
 LiDAR Fuel Analysis Pipeline
 Processes LAZ files and generates fuel metrics using R LidarForFuel package
+Usage: python or python3 pipeline.py <file1.laz> [file2.laz ...]
 """
 
 
