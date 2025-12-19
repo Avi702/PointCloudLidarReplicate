@@ -71,7 +71,7 @@ def plot_bd_profile(profile_csv, output_file, cbh=None, threshold_abs=0.02, thre
                     label=f'Canopy Base Height (CBH = {cbh:.2f} m)', zorder=4)
     
     # Formatting
-    plt.xlabel('Canopy Bulk Density (kg/m³)', fontsize=13, fontweight='bold')
+    plt.xlabel('Bulk Density (kg/m³)', fontsize=13, fontweight='bold')
     plt.ylabel('Height Above Ground (m)', fontsize=13, fontweight='bold')
     plt.title('Bulk Density Vertical Profile with Key Thresholds', fontsize=15, fontweight='bold')
     plt.grid(True, alpha=0.3, linestyle=':', linewidth=0.5)
