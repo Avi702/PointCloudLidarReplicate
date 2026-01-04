@@ -4,6 +4,8 @@ results/
 .DS_Store
 __pycache__/
 *.pyc
-LidarForFuel/
 hhd
 results_tensor
+hhdc_sim-main
+LidarForFuel/
+cloth_nodes.txt

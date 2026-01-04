@@ -19,8 +19,7 @@
 #' Fuel_metrics <- ffuelmetrics(profile_table=Profile,threshold=0.02)
 #'
 #' }
-
-
+#' @export
 ffuelmetrics= function(profile_table,threshold,H_PAI=0){
 
   if(any(stringr::str_detect(names(profile_table ),"BD"))==F){
@@ -45,6 +44,10 @@ ffuelmetrics= function(profile_table,threshold,H_PAI=0){
 
     ## CBD in kg/m3 ----
     profile_table$CBD=profile_table$PAD*(profile_table$FMA)
+    profile_table[!is.finite(CBD)] <- NA_real_
+    #TODO should understand why PAD can be infinite or NA
+    profile_table[!is.finite(CBD)] <- 0
+    profile_table[is.na(CBD)] <- 0
   }
 
 
@@ -195,4 +198,3 @@ names(VVP_metrics)=c("Profil_Type","Profil_Type_L","threshold","Height","CBH","F
 return(list(VVP_metrics,PAD_CBD_Profile))
 
 }
-

@@ -22,9 +22,14 @@ grDevices = importr('grDevices')
 data_table = importr('data.table')
 ggthemes = importr('ggthemes')
 gridExtra = importr('gridExtra')
+lubridate = importr('lubridate')
+RANN = importr('RANN')
+sf = importr('sf')
+terra = importr('terra')
+stringr = importr('stringr')
 
 
-ro.r('source("/Users/avnee/LiDAR/PointCloudLidarReplicate/CBD.R")')
+ro.r('source("/Users/avnee/LiDAR/PointCloudLidarReplicate/fCBDprofile_fuelmetrics.R")')
 ro.r('source("/Users/avnee/LiDAR/PointCloudLidarReplicate/ffuelmetrics.R")')
 ro.r('source("/Users/avnee/LiDAR/PointCloudLidarReplicate/fPCpretreatment.R")')
 
@@ -232,6 +237,11 @@ def run_pipeline(laz_files, output_dir='results', pixel_resolution=10.0, **kwarg
     print()
     
     output_path = Path(output_dir)
+    # Ensure output directory is relative to the script location if not absolute
+    if not output_path.is_absolute():
+        output_path = Path(__file__).resolve().parent / output_dir
+        
+    print(f"Output directory: {output_path}")
     output_path.mkdir(parents=True, exist_ok=True)
     
     all_profiles = []

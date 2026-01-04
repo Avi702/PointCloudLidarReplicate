@@ -42,9 +42,8 @@
 #' terra::plot(M30_FontBlanche_Raster[[8:23]])
 #'
 #' }
-
-
-fCBDprofile_fuelmetrics=function(datatype="Pixel",X,Y,Z,Zref,ReturnNumber,Easting,Northing,Elevation,LMA,gpstime,Height_Cover=2,threshold=0.02,scanning_angle=TRUE,use_cover=FALSE,WD,limit_N_points=400,limit_flightheight=0,limit_vegetationheight=0.1,H_PAI=0,omega=0.77,d=1,G=0.5){
+#' @export
+fCBDprofile_fuelmetrics=function(datatype="Pixel",X,Y,Z,Zref,ReturnNumber,Easting,Northing,Elevation,LMA,gpstime,Height_Cover=2,threshold=0.02,scanning_angle=TRUE,use_cover=FALSE,WD,limit_N_points=400,limit_flightheight=800,limit_vegetationheight=0.1,H_PAI=0,omega=0.77,d=1,G=0.5){
   if(class(datatype)[1]=="LAS"){
     X=datatype$X
     Y=datatype$Y
@@ -60,7 +59,6 @@ fCBDprofile_fuelmetrics=function(datatype="Pixel",X,Y,Z,Zref,ReturnNumber,Eastin
   }
   date=mean(gpstime)
   library(data.table)
-  print(limit_N_points)
   if(length(Z)<limit_N_points){
     warning("NULL return: The number of point < limit_N_points: check your tile or you pointcloud")
     VVP_metrics=c(Profil_Type=-1,Profil_Type_L=-1,threshold=-1,Height=-1,CBH=-1,FSG=-1,Top_Fuel=-1,H_Bush=-1,continuity=-1,VCI_PAD=-1,VCI_lidr=-1,entropy_lidr=-1,PAI_tot=-1,CBD_max=-1,CFL=-1,TFL=-1,MFL=-1,FL_1_3=-1,GSFL=-1,FL_0_1=-1,FMA=-1,date=date,Cover=-1,Cover_4=-1,Cover_6=-1)
@@ -108,19 +106,19 @@ fCBDprofile_fuelmetrics=function(datatype="Pixel",X,Y,Z,Zref,ReturnNumber,Eastin
   norm_U=999999
   }
   ### Exception if the mean of norm_U < limit_flightheight For LiDAr HD 1000m mean that plane flew lower than 1000m over the plot => unlikely for LiDAR HD => probably error in trajectory reconstruction
-  #if(mean(norm_U,na.rm=T)<limit_flightheight){
-    #warning("NULL return: limit_flightheight below the threshold. Check your trajectory and avoid using scanning_angle mode if the trajectory is uncertain")
+  if(mean(norm_U,na.rm=T)<limit_flightheight){
+    warning("NULL return: limit_flightheight below the threshold. Check your trajectory and avoid using scanning_angle mode if the trajectory is uncertain")
 
-    #VVP_metrics=c(Profil_Type=-1,Profil_Type_L=-1,threshold=-1,Height=-1,CBH=-1,FSG=-1,Top_Fuel=-1,H_Bush=-1,continuity=-1,VCI_PAD=-1,VCI_lidr=-1,entropy_lidr=-1,PAI_tot=-1,CBD_max=-1,CFL=-1,TFL=-1,MFL=-1,FL_1_3=-1,GSFL=-1,FL_0_1=-1,FMA=-1,date=date,Cover=-1,Cover_4=-1,Cover_6=-1)
-    #VVP_metrics_CBD=rep(-1,150)
-    #VVP_metrics=c(VVP_metrics,VVP_metrics_CBD)
-    #PAD_CBD_Profile=NULL
-    #names(VVP_metrics)=c("Profil_Type","Profil_Type_L","threshold","Height","CBH","FSG","Top_Fuel","H_Bush","continuity","VCI_PAD","VCI_lidr","entropy_lidr","PAI_tot","CBD_max","CFL","TFL","MFL","FL_1_3","GSFL","FL_0_1","FMA","date","Cover","Cover_4","Cover_6",paste0("CBD_",rep(1:150)))
-    #if(class(datatype)[1]=="LAS"){
-   #   return(list(VVP_metrics,PAD_CBD_Profile))}
-    #if(datatype=="Pixel"){
-    #  return(as.list(VVP_metrics))}
-#  }
+    VVP_metrics=c(Profil_Type=-1,Profil_Type_L=-1,threshold=-1,Height=-1,CBH=-1,FSG=-1,Top_Fuel=-1,H_Bush=-1,continuity=-1,VCI_PAD=-1,VCI_lidr=-1,entropy_lidr=-1,PAI_tot=-1,CBD_max=-1,CFL=-1,TFL=-1,MFL=-1,FL_1_3=-1,GSFL=-1,FL_0_1=-1,FMA=-1,date=date,Cover=-1,Cover_4=-1,Cover_6=-1)
+    VVP_metrics_CBD=rep(-1,150)
+    VVP_metrics=c(VVP_metrics,VVP_metrics_CBD)
+    PAD_CBD_Profile=NULL
+    names(VVP_metrics)=c("Profil_Type","Profil_Type_L","threshold","Height","CBH","FSG","Top_Fuel","H_Bush","continuity","VCI_PAD","VCI_lidr","entropy_lidr","PAI_tot","CBD_max","CFL","TFL","MFL","FL_1_3","GSFL","FL_0_1","FMA","date","Cover","Cover_4","Cover_6",paste0("CBD_",rep(1:150)))
+    if(class(datatype)[1]=="LAS"){
+      return(list(VVP_metrics,PAD_CBD_Profile))}
+    if(datatype=="Pixel"){
+      return(as.list(VVP_metrics))}
+  }
   ### remove the bottom & top value of the seq and add d/2 to get the middle height of the strata for each stratum
   seq_layer=seq_layer[-c(1,length(seq_layer))]+(d/2)
 
