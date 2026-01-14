@@ -4,8 +4,11 @@ results/
 .DS_Store
 __pycache__/
 *.pyc
-hhd
-results_tensor
-hhdc_sim-main
+hhd/
+results_tensor/
+hhdc_sim-main/
 LidarForFuel/
 cloth_nodes.txt
+tensoranalysis.py
+data/
+comparison.py

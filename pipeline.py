@@ -29,9 +29,9 @@ terra = importr('terra')
 stringr = importr('stringr')
 
 
-ro.r('source("/Users/avnee/LiDAR/PointCloudLidarReplicate/fCBDprofile_fuelmetrics.R")')
-ro.r('source("/Users/avnee/LiDAR/PointCloudLidarReplicate/ffuelmetrics.R")')
-ro.r('source("/Users/avnee/LiDAR/PointCloudLidarReplicate/fPCpretreatment.R")')
+ro.r('source("/Users/avnee/PointCloudLidarReplicate/fCBDprofile_fuelmetrics.R")')
+ro.r('source("/Users/avnee/PointCloudLidarReplicate/ffuelmetrics.R")')
+ro.r('source("/Users/avnee/PointCloudLidarReplicate/fPCpretreatment.R")')
 
 
 

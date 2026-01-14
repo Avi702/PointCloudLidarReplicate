@@ -16,7 +16,7 @@ tensor_size = 20
 clump = 0.77  
 FMA = 0.2  
 
-cos_theta = 0.75  
+cos_theta = 0.5 
 
 def normalize_height_with_tin(file):
     """
@@ -196,28 +196,7 @@ def compute_BD(PAD, FMA):
         BD.append(height * FMA)
     return BD
 
-def get_max_height(normalized_tensor, bin_size):
-    """
-    Get the maximum vegetation height from the normalized tensor.
-    
-    Args:
-        normalized_tensor: Voxel tensor normalized to ground
-        bin_size: Height of each bin in meters
-    
-    Returns:
-        max_height: Maximum height in meters
-    """
-    max_z_index = 0
-    x_size, y_size, z_size = normalized_tensor.shape
-    
-    for x in range(x_size):
-        for y in range(y_size):
-            column = normalized_tensor[x, y, :]
-            indices = np.nonzero(column)[0]
-            if len(indices) > 0:
-                max_z_index = max(max_z_index, indices[-1])
-    
-    return (max_z_index + 1) * bin_size  # Convert to meters
+
 
 results = []
 for file_path in directory_path.iterdir():
@@ -229,9 +208,6 @@ for file_path in directory_path.iterdir():
         
         # Normalize the tensor using TIN interpolation
         norm_tensor = normalize_height_with_tin(file_path)
-        
-        # Get maximum vegetation height
-        max_height = get_max_height(norm_tensor, bin_size)
         
         # Compute metrics at all height levels
         HAG, NRD, Gf = compute_NRD(norm_tensor, bin_size)
@@ -246,8 +222,7 @@ for file_path in directory_path.iterdir():
                 'HAG': HAG[i],
                 'NRD': NRD[i],
                 'PAD': PAD[i],
-                'BD': BD[i],
-                'Max_Height': max_height
+                'CBD': BD[i],
             })
 
 df = pd.DataFrame(results)

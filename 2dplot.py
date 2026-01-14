@@ -8,6 +8,43 @@ from matplotlib.patches import Patch
 import numpy as np
 import sys
 from pathlib import Path
+from scipy.interpolate import griddata
+
+def rasterize_points(x, y, values, resolution=1.0, method='linear'):
+    """
+    Rasterize point data into a continuous grid using interpolation.
+    
+    Args:
+        x, y: Coordinates
+        values: Values at coordinates
+        resolution: Grid cell size
+        method: Interpolation method ('linear', 'nearest', 'cubic')
+    
+    Returns:
+        grid: Interpolated mesh
+        extent: [xmin, xmax, ymin, ymax]
+    """
+    x_min, x_max = np.min(x), np.max(x)
+    y_min, y_max = np.min(y), np.max(y)
+    
+    # Define grid coordinates
+    grid_x, grid_y = np.mgrid[
+        x_min:x_max:resolution, 
+        y_min:y_max:resolution
+    ]
+    
+    # Interpolate unstructured data to grid
+    grid = griddata(
+        (x, y), 
+        values, 
+        (grid_x, grid_y), 
+        method=method,
+        fill_value=np.nan
+    )
+    
+    # Transpose to match imshow expectation (rows=y, cols=x)
+    # Origin will be handled by imshow='lower'
+    return grid.T, [x_min, x_max, y_min, y_max]
 
 def create_2dplot_cbd(csv_path):
     print(f"Loading data from: {csv_path}")
@@ -28,6 +65,10 @@ def create_2dplot_cbd(csv_path):
     # Convert to numpy array
     cbd_array = np.array(raw_cbd)
     
+    # Rasterize using interpolation for continuous heatmap
+    # Using 'linear' ensures continuity between points
+    grid_cbd, extent = rasterize_points(df_clean['X'], df_clean['Y'], cbd_array, resolution=1.0, method='linear')
+    
     # Define a continuous colormap from Green -> Yellow -> Red
     # Values < 0.01 will be Green
     # Values > 0.10 will be Red
@@ -36,31 +77,29 @@ def create_2dplot_cbd(csv_path):
     colors = ["green", "yellow", "red"]
     # Define the positions for these colors (0.0 to 1.0 range)
     cmap = mcolors.LinearSegmentedColormap.from_list("fire_risk", colors)
+    cmap.set_bad('white', 0) # Set NaN values to transparent/white
     
     norm = plt.Normalize(vmin=0.01, vmax=0.10)
     
-    print(f"CBD Range: {np.min(cbd_array):.4f} to {np.max(cbd_array):.4f}")
+    print(f"CBD Range: {np.nanmin(grid_cbd):.4f} to {np.nanmax(grid_cbd):.4f}")
         
     # 4. Graph the results
-    # Center the coordinates
-    x_center = np.mean(x_coords)
-    y_center = np.mean(y_coords)
-    x_plot = np.array(x_coords) - x_center
-    y_plot = np.array(y_coords) - y_center
+    # Use the raster extent for axes
+    x_min, x_max, y_min, y_max = extent
+    x_center = (x_min + x_max) / 2
+    y_center = (y_min + y_max) / 2
     
-    # Sort points so high values are drawn on top
-    sort_indices = np.argsort(cbd_array)
-    x_sorted = x_plot[sort_indices]
-    y_sorted = y_plot[sort_indices]
-    c_sorted = cbd_array[sort_indices]
+    # Center the extent for plotting
+    plot_extent = [x_min - x_center, x_max - x_center, y_min - y_center, y_max - y_center]
     
     # Create the plot
     fig, ax = plt.subplots(figsize=(12, 10))
     
-    scatter = ax.scatter(x_sorted, y_sorted, c=c_sorted, s=2, cmap=cmap, norm=norm, alpha=1.0)
+    # Use imshow for rasterized plotting with bilinear interpolation for smoothness
+    img = ax.imshow(grid_cbd, extent=plot_extent, origin='lower', cmap=cmap, norm=norm, interpolation='bilinear')
     
     # Add a continuous colorbar
-    cbar = plt.colorbar(scatter, ax=ax)
+    cbar = plt.colorbar(img, ax=ax)
     cbar.set_label('Canopy Bulk Density (kg/m³)')
     
     # Add text annotations for the risk zones on the colorbar
@@ -73,7 +112,9 @@ def create_2dplot_cbd(csv_path):
     
     ax.legend(handles=legend_elements, loc='upper right', title="Fire Risk Thresholds", fontsize=10)
     
-    ax.set_title(f"2D Fuel Density Map (Continuous)\n(n={len(x_sorted):,})")
+    # Calculate non-nan pixels for count
+    n_pixels = np.count_nonzero(~np.isnan(grid_cbd))
+    ax.set_title(f"2D Fuel Density Map (Rasterized 1m grid)\n(covered area approx. {n_pixels} m²)")
     ax.set_xlabel('X (meters from center)')
     ax.set_ylabel('Y (meters from center)')
     ax.set_aspect('equal')
@@ -90,7 +131,8 @@ def create_2dplot_cbd(csv_path):
     output_file = plots_dir / f"{stem}_2d_plot.png"
     plt.savefig(output_file, dpi=300, bbox_inches='tight')
     print(f"Saved plot to: {output_file}")
-"""
+
+
 def create_2d_plot_cfl(csv_path):
     print(f"Loading data from: {csv_path}")
     
@@ -110,54 +152,54 @@ def create_2d_plot_cfl(csv_path):
     # Convert to numpy array
     cfl_array = np.array(raw_cfl)
     
+    # Rasterize the data (resolution=1.0, method='linear')
+    grid_cfl, extent = rasterize_points(df_clean['X'], df_clean['Y'], cfl_array, resolution=1.0, method='linear')
+    
     # Define a continuous colormap from Blue -> Cyan -> Yellow -> Red
     colors = ["blue", "cyan", "yellow", "red"]
     cmap = mcolors.LinearSegmentedColormap.from_list("cfl_risk", colors)
+    cmap.set_bad('white', 0)
     
-    norm = plt.Normalize(vmin=np.min(cfl_array), vmax=np.max(cfl_array))
+    norm = plt.Normalize(vmin=np.nanmin(grid_cfl), vmax=np.nanmax(grid_cfl))
     
-    print(f"CFL Range: {np.min(cfl_array):.4f} to {np.max(cfl_array):.4f}")
+    print(f"CFL Range: {np.nanmin(grid_cfl):.4f} to {np.nanmax(grid_cfl):.4f}")
         
     # 4. Graph the results
-    # Center the coordinates
-    x_center = np.mean(x_coords)
-    y_center = np.mean(y_coords)
-    x_plot = np.array(x_coords) - x_center
-    y_plot = np.array(y_coords) - y_center
+    # Use the raster extent for axes
+    x_min, x_max, y_min, y_max = extent
+    x_center = (x_min + x_max) / 2
+    y_center = (y_min + y_max) / 2
     
-    # Sort points so high values are drawn on top
-    sort_indices = np.argsort(cfl_array)
-    x_sorted = x_plot[sort_indices]
-    y_sorted = y_plot[sort_indices]
-    c_sorted = cfl_array[sort_indices]
+    plot_extent = [x_min - x_center, x_max - x_center, y_min - y_center, y_max - y_center]
     
     # Create the plot
     fig, ax = plt.subplots(figsize=(12, 10))
     
-    scatter = ax.scatter(x_sorted, y_sorted, c=c_sorted, s=2, cmap=cmap, norm=norm, alpha=1.0)
+    # Use imshow for rasterized plotting
+    img = ax.imshow(grid_cfl, extent=plot_extent, origin='lower', cmap=cmap, norm=norm, interpolation='bilinear')
     
     # Add a continuous colorbar
-    cbar = plt.colorbar(scatter, ax=ax)
+    cbar = plt.colorbar(img, ax=ax)
     cbar.set_label('Canopy Fuel Load (kg/m²)')
     
-    ax.set_title(f"2D Canopy Fuel Load Map (Continuous)\n(n={len(x_sorted):,})")
+    n_pixels = np.count_nonzero(~np.isnan(grid_cfl))
+    ax.set_title(f"2D Canopy Fuel Load Map (Rasterized 1m grid)\n(covered area approx. {n_pixels} m²)")
     ax.set_xlabel('X (meters from center)')
     ax.set_ylabel('Y (meters from center)')
     ax.set_aspect('equal')
     ax.grid(True, alpha=0.3)
 
-   plt.tight_layout()
+    plt.tight_layout()
 
-   results_dir = Path('results')
-   plots_dir = results_dir / 'plots'
-   plots_dir.mkdir(parents=True, exist_ok=True)
+    results_dir = Path('results')
+    plots_dir = results_dir / 'plots'
+    plots_dir.mkdir(parents=True, exist_ok=True)
 
-   stem = Path(csv_path).stem
-   output_file = plots_dir / f"{stem}_2d_plot.png"
-   plt.savefig(output_file, dpi=300, bbox_inches='tight')
-   print(f"Saved plot to: {output_file}")
+    stem = Path(csv_path).stem
+    output_file = plots_dir / f"{stem}_2d_plot.png"
+    plt.savefig(output_file, dpi=300, bbox_inches='tight')
+    print(f"Saved plot to: {output_file}")
 
-"""
 
 if __name__ == "__main__":
     if len(sys.argv) > 1:
