@@ -13,7 +13,8 @@ from scipy.interpolate import griddata
 hhdcs_dir = '/Users/avnee/PointCloudLidarReplicate/hhd/hhdc_casals/'
 hhdcs_files = le_tools.get_files(hhdcs_dir, concat_dir=True)
 # Select one random file
-random_hhdc = '/Users/avnee/PointCloudLidarReplicate/hhd/hhdc_casals/363148.0_4304467.0_hhdc_casals.npz'
+random_hhdc = np.random.choice(hhdcs_files, 1)[0]
+print(random_hhdc)
 
 hhdc_hr = np.load(random_hhdc)['arr_0']
 hhdc_lr = np.load(random_hhdc.replace('hhdc_casals', 'hhdc_1x1'))['arr_0']
@@ -149,7 +150,7 @@ def create_2dplot_cbd(csv_path):
     plt.tight_layout()
 
 
-import os
+
 
 def create_cropped_comparison(csv_path, tensor_chm, center_coordinates, crop_size):
     center_x, center_y = center_coordinates
@@ -173,13 +174,16 @@ def create_cropped_comparison(csv_path, tensor_chm, center_coordinates, crop_siz
     y_coords = df_crop['Y'] - center_y
     values = df_crop['CBD'].values
     
-    resolution = 1.0 
-
-    grid_x, grid_y = np.mgrid[
-        -size_x/2 : size_x/2 : complex(0, size_x/resolution),
-        -size_y/2 : size_y/2 : complex(0, size_y/resolution)
-    ]
+    nx, ny = tensor_chm.shape
     
+    x_step = size_x / nx
+    y_step = size_y / ny
+    
+    # Generate center coordinates
+    grid_x_1d = np.linspace(-size_x/2 + x_step/2, size_x/2 - x_step/2, nx)
+    grid_y_1d = np.linspace(-size_y/2 + y_step/2, size_y/2 - y_step/2, ny)
+    
+    grid_x, grid_y = np.meshgrid(grid_x_1d, grid_y_1d, indexing='ij')
 
     points = np.column_stack((x_coords, y_coords))
     
@@ -188,6 +192,9 @@ def create_cropped_comparison(csv_path, tensor_chm, center_coordinates, crop_siz
     mask_nan = np.isnan(grid_cbd)
     if np.any(mask_nan):
         grid_cbd[mask_nan] = griddata(points, values, (grid_x[mask_nan], grid_y[mask_nan]), method='nearest')
+
+
+    grid_cbd = filter_percentiles(grid_cbd, [2, 98])
 
     fig, axes = plt.subplots(1, 2, figsize=(12, 12))
     
@@ -201,7 +208,7 @@ def create_cropped_comparison(csv_path, tensor_chm, center_coordinates, crop_siz
     cmap = mcolors.LinearSegmentedColormap.from_list("fire_risk", colors)
     norm = plt.Normalize(vmin=0.01, vmax=0.10)
     
-    im1 = axes[1].imshow(grid_cbd.T, origin='lower', extent=extent, cmap=cmap, norm=norm, interpolation='bilinear')
+    im1 = axes[1].imshow(grid_cbd.T, origin='lower', extent=extent, cmap=cmap, norm=norm)
     
     axes[1].set_xlim(-size_x/2, size_x/2)
     axes[1].set_ylim(-size_y/2, size_y/2)
@@ -217,7 +224,7 @@ def create_cropped_comparison(csv_path, tensor_chm, center_coordinates, crop_siz
     plt.show()
 hhdc_hr_dem, hhdc_hr_dtm, hhdc_hr_chm = get_views(hhdc_hr)
 
-filename_base = '363148.0_4304467.0_hhdc_casals.npz'
+filename_base = random_hhdc.split('/')[-1]
 # Extract coords from filename
 parts = filename_base.split('_')
 cx = float(parts[0])
