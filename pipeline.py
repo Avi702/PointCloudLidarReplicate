@@ -164,16 +164,10 @@ def calculate_metrics(las, **kwargs):
             except:
                 pass
     
-    # Add X, Y, Z coordinates to profile
-    # X, Y are the mean coordinates of the plot (same for all height bins)
-    # Z is the height value from the H column (height bin center)
+  
     if not profile_df.empty and las is not ro.NULL:
         try:
-            # Get mean X and Y from the LAS object to represent the plot location
-            # We use R to calculate the mean to avoid transferring all points to Python
             ro.r.assign("temp_las", las)
-            
-            # Extract all points to create a dense point cloud with metrics
             # This allows 2D/3D plotting of the points
             x_coords = np.array(las.slots['data'].rx2('X'))
             y_coords = np.array(las.slots['data'].rx2('Y'))
@@ -202,20 +196,17 @@ def calculate_metrics(las, **kwargs):
             else:
                 d = 1.0
             
-            # Calculate corresponding H bin for each point
+ 
             points_df['H_match'] = np.floor(points_df['Z'] / d) * d + (d/2)
-            
-            # Prepare profile for merging
+
             profile_cols = [c for c in profile_df.columns if c not in ['X', 'Y', 'Z', 'H']]
             profile_to_merge = profile_df[profile_cols + ['H']].copy()
             
             # Merge points with profile metrics
             merged_df = pd.merge(points_df, profile_to_merge, left_on='H_match', right_on='H', how='left')
             
-            # Clean up
             merged_df = merged_df.drop(columns=['H_match'])
             
-            # Use this detailed dataframe as the result
             profile_df = merged_df
             
         except Exception as e:
@@ -237,7 +228,6 @@ def run_pipeline(laz_files, output_dir='results', pixel_resolution=10.0, **kwarg
     print()
     
     output_path = Path(output_dir)
-    # Ensure output directory is relative to the script location if not absolute
     if not output_path.is_absolute():
         output_path = Path(__file__).resolve().parent / output_dir
         
@@ -254,7 +244,6 @@ def run_pipeline(laz_files, output_dir='results', pixel_resolution=10.0, **kwarg
         
         try:
             print("  Preprocessing with fPCpretreatment...")
-            # Use the official fPCpretreatment function from LidarForFuel
             las_processed = preprocess_with_fPCpretreatment(
                 laz_file, 
                 WD=kwargs.get('WD', 600.0),
@@ -268,7 +257,7 @@ def run_pipeline(laz_files, output_dir='results', pixel_resolution=10.0, **kwarg
             print("  Calculating metrics...")
             profile, metrics = calculate_metrics(las_processed, **kwargs)
 
-            # Save individual profile CSV immediately
+
             csv_name = filename.replace('.laz', '_profile.csv')
             csv_path = output_path / csv_name
             profile.to_csv(csv_path, index=False)
