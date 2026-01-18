@@ -101,7 +101,7 @@ def create_cropped_comparison(csv_path, tensor_chm, center_coordinates, crop_siz
     if np.any(mask_nan):
         grid_cbd[mask_nan] = griddata(points, values, (grid_x[mask_nan], grid_y[mask_nan]), method='nearest')
 
-    grid_cbd[tensor_chm_flipped < 2.0] = 0
+    grid_cbd[tensor_chm_flipped <= 12.5] = 0
     grid_cbd = filter_percentiles(grid_cbd, [2, 98])
 
 
@@ -115,7 +115,7 @@ def create_cropped_comparison(csv_path, tensor_chm, center_coordinates, crop_siz
     plt.colorbar(im0, ax=axes[0], label='Height (m)')
     
 
-    colors = ["green", "green", "yellow", "red"] 
+    colors = ["darkblue","darkgreen", "green", "yellow", "orange","red","darkred"]
     cmap = mcolors.LinearSegmentedColormap.from_list("fire_risk", colors)
 
     norm = plt.Normalize(vmin=0.0, vmax=0.10)
