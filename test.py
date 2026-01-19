@@ -5,7 +5,7 @@ import pandas as pd
 import matplotlib.colors as mcolors
 from matplotlib.patches import Patch
 from scipy.interpolate import griddata
-
+from scipy.spatial import cKDTree
 
 hhdcs_dir = '/Users/avnee/PointCloudLidarReplicate/hhd/hhdc_casals/'
 hhdcs_files = le_tools.get_files(hhdcs_dir, concat_dir=True)
@@ -67,12 +67,19 @@ def create_cropped_comparison(csv_path, tensor_chm, center_coordinates, crop_siz
     center_x, center_y = center_coordinates
     size_x, size_y = crop_size
 
+
     tensor_chm_flipped = np.flipud(tensor_chm)
     
 
     df = pd.read_csv(csv_path)
-    df.columns = df.columns.str.strip()
+    df.columns = df.columns.str.strip() 
     
+
+    height_col = 'Z'
+    if height_col not in df.columns:
+        print(f"Error: Could not find height column (Z, H, or Height) in CSV. Columns: {df.columns}")
+        return
+
     min_x, max_x = center_x - size_x/2, center_x + size_x/2
     min_y, max_y = center_y - size_y/2, center_y + size_y/2
     
@@ -86,45 +93,56 @@ def create_cropped_comparison(csv_path, tensor_chm, center_coordinates, crop_siz
 
     x_coords = df_crop['X'] - center_x
     y_coords = df_crop['Y'] - center_y
-    values = df_crop['CBD'].values
-    ny, nx = tensor_chm_flipped.shape
+    values_cbd = df_crop['CBD'].values
+    values_height = df_crop[height_col].values  
     
-
+    ny, nx = tensor_chm_flipped.shape
     grid_x_1d = np.linspace(-size_x/2, size_x/2, nx)
     grid_y_1d = np.linspace(-size_y/2, size_y/2, ny)
-    
     grid_x, grid_y = np.meshgrid(grid_x_1d, grid_y_1d) 
-
     points = np.column_stack((x_coords, y_coords))
-    grid_cbd = griddata(points, values, (grid_x, grid_y), method='linear')
-    mask_nan = np.isnan(grid_cbd)
-    if np.any(mask_nan):
-        grid_cbd[mask_nan] = griddata(points, values, (grid_x[mask_nan], grid_y[mask_nan]), method='nearest')
 
-    grid_cbd[tensor_chm_flipped <= 12.5] = 0
+    grid_cbd = griddata(points, values_cbd, (grid_x, grid_y), method='linear')
+    
+
+    grid_height = griddata(points, values_height, (grid_x, grid_y), method='linear')
+
+
+    mask_nan_cbd = np.isnan(grid_cbd)
+    if np.any(mask_nan_cbd):
+        grid_cbd[mask_nan_cbd] = griddata(points, values_cbd, (grid_x[mask_nan_cbd], grid_y[mask_nan_cbd]), method='nearest')
+        
+    mask_nan_h = np.isnan(grid_height)
+    if np.any(mask_nan_h):
+        grid_height[mask_nan_h] = griddata(points, values_height, (grid_x[mask_nan_h], grid_y[mask_nan_h]), method='nearest')
+
+ 
+    
+    height_threshold = 1.25 # 10% of the CBH
+    grid_cbd[grid_height <= height_threshold] = 0
+
+
+
     grid_cbd = filter_percentiles(grid_cbd, [2, 98])
 
 
     fig, axes = plt.subplots(1, 2, figsize=(12, 12))
-    
     extent = [-size_x/2, size_x/2, -size_y/2, size_y/2]
-    
+
 
     im0 = axes[0].imshow(tensor_chm_flipped, origin='lower', extent=extent, cmap='viridis')
-    axes[0].set_title('HSPR CHM')
+    axes[0].set_title('Tensor CHM (Height)')
     plt.colorbar(im0, ax=axes[0], label='Height (m)')
-    
 
-    colors = ["darkblue","darkgreen", "green", "yellow", "orange","red","darkred"]
+
+    colors = ["darkblue","darkgreen", "green", "yellow", "orange","red","darkred","brown"]
     cmap = mcolors.LinearSegmentedColormap.from_list("fire_risk", colors)
-
     norm = plt.Normalize(vmin=0.0, vmax=0.10)
     
     im1 = axes[1].imshow(grid_cbd, origin='lower', extent=extent, cmap=cmap, norm=norm)
-    
-    axes[1].set_title('Canopy Bulk Density (CBD)')
-    axes[1].set_xlabel('X (meters from center)')
-    axes[1].set_ylabel('Y (meters from center)')
+    axes[1].set_title('Point Cloud CBD')
+    axes[1].set_xlabel('X (meters)')
+    axes[1].set_ylabel('Y (meters)')
     axes[1].set_aspect('equal')
     axes[1].grid(True, alpha=0.3)
     
