@@ -1,236 +1,145 @@
-from pathlib import Path
 import numpy as np
 import pandas as pd
-import sys
-import CSF
-from scipy.spatial import Delaunay
-from scipy.interpolate import LinearNDInterpolator
+from pathlib import Path
+from tqdm import tqdm
+import le_tools 
 
-if len(sys.argv) < 2:
-    print("Usage: python tensoranalysis.py <directory_path>")
-    sys.exit(1)
+# --- CONFIGURATION ---
+hhdcs_dir = Path('/Users/avnee/PointCloudLidarReplicate/hhdc_sim-main/hhdcfiles/hhdc_casals')
 
-directory_path = Path(sys.argv[1])
-bin_size = 0.5  
-tensor_size = 20  
-clump = 0.77  
-FMA = 0.2  
+# Constants
+BIN_SIZE = 0.5    
+CLUMP = 0.77  
+FMA = 0.2         
+COS_THETA = 0.85
 
-cos_theta = 0.5 
+# --- FILTERING & NORMALIZATION ---
 
-def normalize_height_with_tin(file):
+def apply_kernel(dtm, center, k_size):
+    x_0 = center[0] - k_size // 2
+    y_0 = center[1] - k_size // 2
+    x_0 = max(0, x_0)
+    y_0 = max(0, y_0)
+    return dtm[x_0: center[0] + k_size // 2 + 1, y_0: center[1] + k_size // 2 + 1]
+
+def adaptive_dtm_filter(dtm):
+    k_size = 7
+    dtm_out = dtm.copy()
+    for i in range(dtm.shape[0]):
+        for j in range(dtm.shape[1]): 
+            subsection = apply_kernel(dtm, (i, j), k_size).flatten()
+            if subsection.size > 0:
+                le_per = np.percentile(subsection, [70])
+                if dtm[i,j] > le_per[0]:
+                    dtm_out[i,j] = subsection[subsection <= le_per[0]].mean()
+    return dtm_out
+
+def get_normalized_tensor(hhdc):
+    """Shifts the tensor so Z=0 is the ground."""
+    raw_dtm = le_tools.get_dtm(hhdc)
+    smooth_dtm = adaptive_dtm_filter(raw_dtm)
+    
+    nx, ny, nz = hhdc.shape
+    norm_tensor = np.zeros_like(hhdc)
+    
+    for x in range(nx):
+        for y in range(ny):
+            ground_bin = int(smooth_dtm[x, y])
+            if ground_bin < nz:
+                col = hhdc[x, y, ground_bin:]
+                norm_tensor[x, y, :len(col)] = col
+    return norm_tensor
+
+# --- CORE CALCULATION ---
+
+def calculate_global_metrics(normalized_tensor):
     """
-    Normalize the voxel tensor using Triangular Irregular Network (TIN) interpolation.
-    This creates a ground surface model from ground points and normalizes all heights relative to it.
-    
-    Uses Cloth Simulation Filter (CSF) to classify ground points.
-    
-    Returns:
-        normalized_tensor: Tensor with heights normalized to TIN ground surface
+    Returns tuple: (Global_CBD, Max_Height)
     """
-    data = np.load(file)
-    tensor = data[data.files[0]] if len(data.files) > 0 else data['arr_0']
+    total_counts = np.sum(normalized_tensor, axis=(0, 1))
     
-    # Step 1: Extract all points from tensor for CSF
-    points = []
-    
-    for x in range(tensor_size):
-        for y in range(tensor_size):
-            column = tensor[x, y, :]
-            indices = np.nonzero(column)[0]
-            for z_idx in indices:
-                # Use voxel center as point
-                points.append([x * bin_size, y * bin_size, z_idx * bin_size])
-    
-    if not points:
-        return np.zeros_like(tensor, dtype=np.float32)
+    if np.sum(total_counts) == 0: 
+        return 0.0, 0.0
 
-    points = np.array(points)
-    
-    # Step 2: Run CSF to find ground points
-    csf = CSF.CSF()
-    csf.setPointCloud(points)
-    csf.params.bSloopSmooth = True
-    csf.params.cloth_resolution = 1.0
-    csf.params.class_threshold = 0.5
-    
-    ground_indices = CSF.VecInt()
-    non_ground_indices = CSF.VecInt()
-    csf.do_filtering(ground_indices, non_ground_indices)
-    
-    ground_points = points[ground_indices]
-    
-    # If no ground points found (rare), fallback to lowest points
-    if len(ground_points) < 3:
-        ground_points = []
-        for x in range(tensor_size):
-            for y in range(tensor_size):
-                column = tensor[x, y, :]
-                indices = np.nonzero(column)[0]
-                if len(indices) > 0:
-                    ground_points.append([x * bin_size, y * bin_size, indices[0] * bin_size])
-        ground_points = np.array(ground_points)
+    # Find top of canopy
+    valid_bins = np.nonzero(total_counts)[0]
+    if len(valid_bins) == 0: 
+        return 0.0, 0.0
+        
+    max_z = valid_bins[-1]
+    max_height = max_z * BIN_SIZE  # Convert bin index to meters
 
-    # Step 3: Create TIN using Delaunay triangulation
-    xy_coords = ground_points[:, :2]  # X, Y coordinates
-    z_values = ground_points[:, 2]     # Z heights
+    cbd_values = []
+    cdf = np.cumsum(total_counts)
     
-    # Create interpolator using TIN
-    try:
-        tin_interpolator = LinearNDInterpolator(xy_coords, z_values, fill_value=np.mean(z_values))
+    for z in range(max_z + 1):
+        N_bin = total_counts[z]
+        N_cumulative = cdf[z]
         
-        # Step 4: Create ground surface for entire grid
-        x_grid, y_grid = np.meshgrid(range(tensor_size), range(tensor_size), indexing='ij')
-        grid_points = np.column_stack([x_grid.ravel() * bin_size, y_grid.ravel() * bin_size])
-        ground_surface_flat = tin_interpolator(grid_points)
-        ground_surface = ground_surface_flat.reshape(tensor_size, tensor_size)
+        NRD = (N_bin / N_cumulative) if N_cumulative > 0 else 0
+        Gf = max(0.00001, min(0.99999, 1.0 - NRD))
         
-    except Exception as e:
-        # Fallback if TIN fails (e.g., collinear points, not enough points)
-        # Use mean ground height for the whole tile
-        mean_ground = np.mean(z_values)
-        ground_surface = np.full((tensor_size, tensor_size), mean_ground)
-    
-    # Step 5: Normalize tensor relative to TIN surface
-    normalized_tensor = np.zeros_like(tensor, dtype=np.float32)
-    
-    for x in range(tensor_size):
-        for y in range(tensor_size):
-            column = tensor[x, y, :]
-            ground_height = ground_surface[x, y]
-            ground_index = int(ground_height / bin_size)
+        PAD = (-np.log(Gf) * COS_THETA) / (0.5 * CLUMP * BIN_SIZE)
+        CBD = PAD * FMA
+        cbd_values.append(CBD)
+        
+    # Return Mean CBD (excluding ground bin 0)
+    if len(cbd_values) > 1:
+        global_cbd = np.mean(cbd_values[1:])
+    else:
+        global_cbd = 0.0
+        
+    return global_cbd, max_height
+
+# --- MAIN EXECUTION ---
+
+if not hhdcs_dir.exists():
+    print(f"ERROR: Directory not found: {hhdcs_dir}")
+else:
+    files = le_tools.get_files(str(hhdcs_dir), concat_dir=True)
+    print(f"Found {len(files)} files. Processing...")
+
+    results = []
+
+    for f in tqdm(files):
+        path = Path(f)
+        if path.suffix != '.npz': continue
+        
+        try:
+            # 1. Load Data
+            data = np.load(path)
+            hhdc = data['arr_0']
             
-            # For each voxel, calculate its height above the TIN surface
-            for z_index in range(len(column)):
-                if column[z_index] > 0:
-                    absolute_height = z_index * bin_size
-                    normalized_height = absolute_height - ground_height
-                    
-                    if normalized_height >= 0:
-                        # Place in normalized position
-                        normalized_z_index = int(normalized_height / bin_size)
-                        if 0 <= normalized_z_index < len(column):
-                            normalized_tensor[x, y, normalized_z_index] += column[z_index]
-    
-    return normalized_tensor
+            # 2. Parse Coords
+            parts = path.stem.split('_')
+            try:
+                c_x = float(parts[0])
+                c_y = float(parts[1])
+            except ValueError:
+                c_x = float(parts[1])
+                c_y = float(parts[2])
 
-
-def compute_NRD(normalized_tensor, bin_size):
-    """
-    Compute Normalized Return Density (NRD) and Gap Fraction (Gf) at all height levels.
-    
-    Args:
-        normalized_tensor: Voxel tensor normalized to ground (z=0 at ground)
-        bin_size: Height of each bin in meters
-    Returns:
-        HAG: List of heights above ground (meters)
-        NRD: Normalized Return Density at each height
-        Gf: Gap fraction (1 - NRD) at each height
-    """
-    x_size, y_size, z_size = normalized_tensor.shape
-    
-    # Find maximum height with data
-    max_z_index = 0
-    for x in range(x_size):
-        for y in range(y_size):
-            column = normalized_tensor[x, y, :]
-            indices = np.nonzero(column)[0]
-            if len(indices) > 0:
-                max_z_index = max(max_z_index, indices[-1])
-    
-    HAG = []
-    NRD = []
-    Gf = []
-    
-    # Calculate metrics for each height bin from ground to max height
-    for z_index in range(max_z_index + 1):
-        height = z_index * bin_size
-        bin_start_index = z_index
-        bin_end_index = z_index + 1
-        
-        total_hits = 0
-        bin_hits = 0
-        
-        for x in range(x_size):
-            for y in range(y_size):
-                # Total hits from ground to top of current bin
-                total_hits += np.sum(normalized_tensor[x, y, :bin_end_index])
-                # Hits within this specific bin
-                bin_hits += np.sum(normalized_tensor[x, y, bin_start_index:bin_end_index])
-        
-        if total_hits > 0:
-            nrd = bin_hits / total_hits
-            gf = 1 - nrd
-        else:
-            nrd = 0
-            gf = 1
-        
-        HAG.append(height)
-        NRD.append(nrd)
-        Gf.append(gf)
-    
-    return HAG, NRD, Gf
-
-def compute_PAD(Gf, clump, bin_size, cos_theta):
-    """
-    Compute Plant Area Density from Gap Fraction.
-    PAD = (-ln(Gf) * cos(theta)) / (0.5 * omega * d)
-    where omega is the clumping factor and d is the bin depth.
-    """
-    PAD = []
-    for gf in Gf:
-        if gf <= 0 or gf >= 1:
-            PAD.append(0)
-        else:
-            pad_value = (-np.log(gf) * cos_theta) / (0.5 * clump * bin_size)
-            PAD.append(pad_value)
-    return PAD
-
-def compute_BD(PAD, FMA):
-    """
-    Compute Bulk Density from Plant Area Density.
-    BD = PAD * FMA
-    """
-    BD = []
-    for height in PAD:
-        BD.append(height * FMA)
-    return BD
-
-
-
-results = []
-for file_path in directory_path.iterdir():
-    if file_path.suffix == '.npz':
-        filename = file_path.stem
-        parts = filename.split('_')
-        x = float(parts[0])
-        y = float(parts[1])
-        
-        # Normalize the tensor using TIN interpolation
-        norm_tensor = normalize_height_with_tin(file_path)
-        
-        # Compute metrics at all height levels
-        HAG, NRD, Gf = compute_NRD(norm_tensor, bin_size)
-        PAD = compute_PAD(Gf, clump, bin_size, cos_theta)
-        BD = compute_BD(PAD, FMA)
-        
-        # Create a row for each height bin
-        for i in range(len(HAG)):
+            # 3. Calculate
+            norm_tensor = get_normalized_tensor(hhdc)
+            
+            # Now returns two values
+            cbd, height = calculate_global_metrics(norm_tensor)
+            
             results.append({
-                'X': x,
-                'Y': y,
-                'HAG': HAG[i],
-                'NRD': NRD[i],
-                'PAD': PAD[i],
-                'CBD': BD[i],
+                'X': c_x, 
+                'Y': c_y, 
+                'CBD': cbd,
+                'H': height  # Added Height column
             })
+            
+        except Exception as e:
+            print(f"Skipping {path.name}: {e}")
 
-df = pd.DataFrame(results)
-
-
-results_dir = Path("/Users/avnee/LiDAR/PointCloudLidarReplicate/results_tensor")
-results_dir.mkdir(exist_ok=True)
-
-output_file = results_dir / f"{directory_path.name}_metrics.csv"
-df.to_csv(output_file, index=False)
-print(f"Metrics saved to {output_file}")
+    # --- SAVE ---
+    if results:
+        df = pd.DataFrame(results)
+        df.to_csv("global_cbd_metrics.csv", index=False) 
+        print(f"\nDone! Saved {len(df)} rows to 'global_cbd_metrics.csv'")
+        print(df.head())
+    else:
+        print("\nNo results were generated.")
