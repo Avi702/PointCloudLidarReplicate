@@ -73,7 +73,7 @@ def create_2dplot_cbd(csv_path):
         grid_height[mask_nan_h] = griddata(points, values_height, (grid_x[mask_nan_h], grid_y[mask_nan_h]), method='nearest')
 
     # 5. Apply Height Threshold
-    height_threshold = 1.25 
+    height_threshold = 1
     print(f"  Filtering low vegetation (Height <= {height_threshold}m)...")
     grid_cbd[grid_height <= height_threshold] = 0
 

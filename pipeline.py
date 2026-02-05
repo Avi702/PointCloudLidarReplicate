@@ -59,16 +59,15 @@ def preprocess_with_fPCpretreatment(laz_file, WD=600.0, LMA=100.0):
     print(f"  Using official fPCpretreatment function...")
     
     try:
-        # Call the actual R function from LidarForFuel with correct parameters
         las_preprocessed = fPCpretreatment(
             chunk=laz_file,
-            classify=True,      # Perform ground classification if not already classified
+            classify=True,     
             LMA=LMA,
             WD=WD,
-            WD_bush=WD,         # Use same WD for understory
-            LMA_bush=LMA,       # Use same LMA for understory
-            H_strata_bush=2,    # Height threshold for bush/canopy separation
-            Height_filter=80    # Maximum height to filter noise
+            WD_bush=WD,         
+            LMA_bush=LMA,      
+            H_strata_bush=2,   
+            Height_filter=80   
         )
         
         return las_preprocessed
@@ -77,7 +76,7 @@ def preprocess_with_fPCpretreatment(laz_file, WD=600.0, LMA=100.0):
         print(f"  Error in fPCpretreatment: {e}")
         print(f"  Falling back to simplified preprocessing...")
         
-        # Fallback to simplified version if official function fails
+
         las = lidR.readLAS(laz_file)
         return preprocess_inmemory_fallback(las, WD, LMA)
 
@@ -109,7 +108,7 @@ def preprocess_inmemory_fallback(las, WD=600.0, LMA=100.0):
         
         n_points <- nrow(las@data)
         
-        # 5. Calculate a SINGLE average sensor position for the whole file
+      
         flight_altitude <- max(las@data$Z, na.rm = TRUE) + 800 
         las@data$Easting <- rep(mean(las@data$X, na.rm = TRUE), n_points)
         las@data$Northing <- rep(mean(las@data$Y, na.rm = TRUE), n_points)
@@ -147,7 +146,7 @@ def calculate_metrics(las, **kwargs):
             except:
                 metrics[name] = None
     
-    # Return both the metrics dictionary and the profile dataframe
+
     profile_df = pd.DataFrame()
     if profile_r is not ro.NULL:
         try:
@@ -168,29 +167,18 @@ def calculate_metrics(las, **kwargs):
     if not profile_df.empty and las is not ro.NULL:
         try:
             ro.r.assign("temp_las", las)
-            # This allows 2D/3D plotting of the points
             x_coords = np.array(las.slots['data'].rx2('X'))
             y_coords = np.array(las.slots['data'].rx2('Y'))
             z_coords = np.array(las.slots['data'].rx2('Z'))
             
-            # Subsample if too many points (keep max 250k for reasonable file size)
-            n_points = len(x_coords)
-            if n_points > 250000:
-                print(f"    Subsampling from {n_points:,} to 250,000 points...")
-                indices = np.random.choice(n_points, 250000, replace=False)
-                x_coords = x_coords[indices]
-                y_coords = y_coords[indices]
-                z_coords = z_coords[indices]
             
-            # Create DataFrame with points
             points_df = pd.DataFrame({
                 'X': x_coords,
                 'Y': y_coords,
                 'Z': z_coords
             })
             
-            # Map profile metrics to points based on height
-            # Determine bin width d from profile
+
             if len(profile_df) > 1:
                 d = profile_df['H'].iloc[1] - profile_df['H'].iloc[0]
             else:
@@ -263,7 +251,6 @@ def run_pipeline(laz_files, output_dir='results', pixel_resolution=10.0, **kwarg
             profile.to_csv(csv_path, index=False)
             print(f"    Saved profile to: {csv_name}")
 
-            # Add filename to metrics and store
             metrics['filename'] = filename
             all_metrics.append(metrics)
 

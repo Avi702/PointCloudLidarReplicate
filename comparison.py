@@ -1,77 +1,175 @@
-import pandas as pd
 import numpy as np
+import matplotlib.pyplot as plt
+import le_tools
+import pandas as pd
+import matplotlib.colors as mcolors
+from matplotlib.patches import Patch
+from scipy.interpolate import griddata
 
 
-r_df = pd.read_csv("/Users/avnee/LiDAR/PointCloudLidarReplicate/results/NEON_4_profile.csv")
+hhdcs_dir = '/Users/avnee/PointCloudLidarReplicate/hhdc_sim-main/hhdc-200-NEON_4/hhdc_casals'
+hhdcs_files = le_tools.get_files(hhdcs_dir, concat_dir=True)
 
-# Extract the unique profile from the R results
-# We group by H and take the first value (since they are identical for the same H)
-r_profile = r_df.groupby('H')[['PAD', 'CBD', 'NRD', 'SD_PAD', 'Ni', 'N', 'CBD_rollM']].first().reset_index()
-r_profile = r_profile.sort_values('H')
+random_hhdc = np.random.choice(hhdcs_files, 1)[0]
+print(f"Selected File: {random_hhdc}")
 
-py_df = pd.read_csv("/Users/avnee/LiDAR/PointCloudLidarReplicate/results_tensor/hhdc_1x1_metrics.csv")
+hhdc_hr = np.load(random_hhdc)['arr_0']
 
-print("\nChecking coordinate consistency...")
-# Coordinate consistency checks between R and Python outputs
-coords = ['X', 'Y']
-stats = ['min', 'max', 'mean']
+try:
+    hhdc_lr = np.load(random_hhdc.replace('hhdc_casals', 'hhdc_1x1'))['arr_0']
+except:
+    pass
 
-print(f"{'Metric':<10} | {'R_Value':<15} | {'Py_Value':<15} | {'Diff':<15}")
-print("-" * 60)
 
-for coord in coords:
-    for stat in stats:
-        r_val = getattr(r_df[coord], stat)()
-        py_val = getattr(py_df[coord], stat)()
-        diff = r_val - py_val
-        print(f"{coord}_{stat:<6} | {r_val:<15.4f} | {py_val:<15.4f} | {diff:<15.4f}")
-print("="*60)
+def apply_kernel(dtm, center, k_size):
+    x_0 = center[0] - k_size // 2
+    y_0 = center[1] - k_size // 2
+    x_0 = 0 if x_0 < 0 else x_0
+    y_0 = 0 if y_0 < 0 else y_0
+    return dtm[x_0: center[0] + k_size // 2 + 1, y_0: center[1] + k_size // 2 + 1]
 
-# Aggregate Python results to get a global average profile to compare with R
-# We group by H and take the mean
-py_profile = py_df.groupby('H')[['PAD', 'CBD', 'NRD', 'SD_PAD', 'Ni', 'N', 'CBD_rollM']].mean().reset_index()
-py_profile = py_profile.sort_values('H')
+def adaptive_dtm_filter(dtm):
+    k_size = 7
+    dtm = dtm.copy()
+    for i in range(0, dtm.shape[0]):
+        for j in range(0, dtm.shape[1]): 
+            subsection = apply_kernel(dtm, (i, j), k_size).flatten()
+            if subsection.shape[0] > 0:
+                le_per = np.percentile(subsection, [70])
+                if dtm[i,j] > le_per[0]:
+                    dtm[i,j] = subsection[np.where(subsection <= le_per[0])].mean()
+    return dtm
 
-# Merge the two profiles on Height
-# R uses 'H', Python uses 'H' (renamed from HAG)
-merged = pd.merge(r_profile, py_profile, on='H', suffixes=('_R', '_Py'))
+def filter_percentiles(view, percentiles):
+    lims = np.percentile(view, percentiles)
+    filtered_view = np.where(view < lims[0], lims[0], view)
+    filtered_view = np.where(filtered_view > lims[1], lims[1], filtered_view)
+    return filtered_view
 
-print(f"Merged columns: {merged.columns.tolist()}")
+def get_views(hhdc):
+    hhdc_dem = le_tools.get_dem(hhdc)
+    hhdc_dem = filter_percentiles(hhdc_dem, [2, 98])
 
-# Calculate errors
-# We'll calculate Mean Absolute Error (MAE) 
+    hhdc_dtm = le_tools.get_dtm(hhdc)
+    hhdc_dtm_filter1 = filter_percentiles(hhdc_dtm, [5, 97])
+    hhdc_dtm_filter2 = adaptive_dtm_filter(hhdc_dtm_filter1.copy())
+    hhdc_dtm_filter3 = filter_percentiles(hhdc_dtm_filter2, [5, 99])
 
-metrics = [
-    ('NRD', 'NRD_R', 'NRD_Py'),
-    ('PAD', 'PAD_R', 'PAD_Py'),
-    ('CBD', 'CBD_R', 'CBD_Py'),
-    ('SD_PAD', 'SD_PAD_R', 'SD_PAD_Py'),
-    ('Ni', 'Ni_R', 'Ni_Py'),
-    ('N', 'N_R', 'N_Py'),
-    ('CBD_rollM', 'CBD_rollM_R', 'CBD_rollM_Py')
-]
+    hhdc_chm = hhdc_dem - hhdc_dtm_filter3
+    hhdc_chm = filter_percentiles(hhdc_chm, [2, 98])
 
-print("\n" + "="*80)
-print(f"{'Metric':<10} | {'MAE':<10} | {'MAPE (%)':<10} | {'wMAPE (%)':<10} | {'R_Mean':<10} | {'Py_Mean':<10}")
-print("-" * 80)
+    hhdc_chm_unfiltered = hhdc_dem - hhdc_dtm_filter1
+    hhdc_chm_unfiltered = filter_percentiles(hhdc_chm_unfiltered, [2, 98])
 
-for name, col_r, col_py in metrics:
-    # Filter out rows where both are effectively zero to avoid skewing MAPE with 0/0 or div by zero
+    return hhdc_dem, (hhdc_dtm_filter1, hhdc_dtm_filter2, hhdc_dtm_filter3), (hhdc_chm, hhdc_chm_unfiltered)
+
+def create_cropped_comparison(csv_path, tensor_chm, center_coordinates, crop_size):
+    center_x, center_y = center_coordinates
+    size_x, size_y = crop_size
+
+    tensor_chm_flipped = np.flipud(tensor_chm)*0.5
+    df = pd.read_csv(csv_path)
+    df.columns = df.columns.str.strip() 
     
-    valid_data = merged[[col_r, col_py]].dropna()
+
+    height_col = 'H'
+    if height_col not in df.columns:
+        print(f"Error: Could not find height column (Z, H, or Height) in CSV. Columns: {df.columns}")
+        return
+
+    min_x, max_x = center_x - size_x/2, center_x + size_x/2
+    min_y, max_y = center_y - size_y/2, center_y + size_y/2
+    mask = (df['X'] >= min_x) & (df['X'] <= max_x) & (df['Y'] >= min_y) & (df['Y'] <= max_y)
+    df_crop = df[mask].copy()
+    if df_crop.empty:
+        print(f"No points found in bounds: X[{min_x:.1f}, {max_x:.1f}], Y[{min_y:.1f}, {max_y:.1f}]")
+        return
+
+
+    x_coords = df_crop['X'] - center_x
+    y_coords = df_crop['Y'] - center_y
+    values_cbd = df_crop['CBD'].values
+    values_height = df_crop[height_col].values  
+    ny, nx = tensor_chm_flipped.shape
     
-    if len(valid_data) == 0:
-        print(f"{name:<10} | No valid data for comparison")
-        continue
+
+    grid_x_1d = np.linspace(-size_x/2, size_x/2, nx)
+    grid_y_1d = np.linspace(-size_y/2, size_y/2, ny)
+    
+    grid_x, grid_y = np.meshgrid(grid_x_1d, grid_y_1d) 
+
+    points = np.column_stack((x_coords, y_coords))
+    grid_cbd = griddata(points, values_cbd, (grid_x, grid_y), method='linear')
+    mask_nan = np.isnan(grid_cbd)
+    if np.any(mask_nan):
+        grid_cbd[mask_nan] = griddata(points, values_cbd, (grid_x[mask_nan], grid_y[mask_nan]), method='nearest')
+
+    grid_cbd = griddata(points, values_cbd, (grid_x, grid_y), method='linear')
+    
+
+    grid_height = griddata(points, values_height, (grid_x, grid_y), method='nearest')
+
+
+    mask_nan_cbd = np.isnan(grid_cbd)
+    if np.any(mask_nan_cbd):
+        grid_cbd[mask_nan_cbd] = griddata(points, values_cbd, (grid_x[mask_nan_cbd], grid_y[mask_nan_cbd]), method='nearest')
         
-    r_vals = valid_data[col_r]
-    py_vals = valid_data[col_py]
+    mask_nan_h = np.isnan(grid_height)
+    if np.any(mask_nan_h):
+        grid_height[mask_nan_h] = griddata(points, values_height, (grid_x[mask_nan_h], grid_y[mask_nan_h]), method='nearest')
+
+ 
     
-    mae = np.mean(np.abs(r_vals - py_vals))
+    height_threshold = 1 # 10% of the CBH
+    grid_cbd[grid_height <= height_threshold] = 0
+    grid_cbd = filter_percentiles(grid_cbd, [2, 98])
+
+
+    fig, axes = plt.subplots(1, 2, figsize=(12, 12))
+    
+    extent = [-size_x/2, size_x/2, -size_y/2, size_y/2]
     
 
-        
-    print(f"{name:<10} | {mae:<10.4f} | {r_vals.mean():<10.4f} | {py_vals.mean():<10.4f}")
+    im0 = axes[0].imshow(tensor_chm_flipped, origin='lower', extent=extent, cmap='viridis')
+    axes[0].set_title('HSPR CHM')
+    plt.colorbar(im0, ax=axes[0], label='Height (m)')
+    
 
-print("="*80)
+    colors = ["darkblue", "darkgreen", "green", "yellow", "orange", "red", "darkred", "brown"]
+    cmap = mcolors.LinearSegmentedColormap.from_list("fire_risk", colors)
 
+    norm = plt.Normalize(vmin=0.0, vmax=0.10)
+    
+    im1 = axes[1].imshow(grid_cbd, origin='lower', extent=extent, cmap=cmap, norm=norm)
+    
+    axes[1].set_title('Canopy Bulk Density (CBD)')
+    axes[1].set_xlabel('X (meters from center)')
+    axes[1].set_ylabel('Y (meters from center)')
+    axes[1].set_aspect('equal')
+    axes[1].grid(True, alpha=0.3)
+    
+    plt.colorbar(im1, ax=axes[1], label='Canopy Bulk Density (kg/m³)')
+    
+    plt.tight_layout()
+    plt.show()
+
+
+hhdc_hr_dem, hhdc_hr_dtm, hhdc_hr_chm = get_views(hhdc_hr)
+
+
+filename_base = random_hhdc.split('/')[-1]
+parts = filename_base.split('_')
+center_x = float(parts[0]) 
+center_y = float(parts[1]) 
+
+sy_pixels, sx_pixels = hhdc_hr.shape[-2:]
+resolution = 1.0 
+size_x = sx_pixels * resolution
+size_y = sy_pixels * resolution
+
+print(f"Center Coords: {center_x}, {center_y}")
+print(f"Dimensions: {size_x}m x {size_y}m")
+
+
+pointcloud_csv = "/Users/avnee/PointCloudLidarReplicate/results/NEON_4_profile.csv"
+create_cropped_comparison(pointcloud_csv, hhdc_hr_chm[1], (center_x, center_y), (size_x, size_y))

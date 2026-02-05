@@ -13,3 +13,8 @@ tensoranalysis.py
 data/
 comparison.py
 global_cbd_metrics.csv
+graphs/
+cbd_images/
+best_model.pth
+HHDC/
+cbd_arrays/
