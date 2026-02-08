@@ -43,6 +43,18 @@ fCBDprofile_fuelmetrics = ro.r['fCBDprofile_fuelmetrics']
 print("Setup complete.\n")
 
 
+
+OUTPUT_DIR = Path("results")
+OUTPUT_DIR.mkdir(exist_ok=True, parents=True)
+PLOTS_DIR = OUTPUT_DIR / "plots"
+PLOTS_DIR.mkdir(exist_ok=True, parents=True)
+PRETREATED_DIR = OUTPUT_DIR / "pretreated"
+PRETREATED_DIR.mkdir(exist_ok=True, parents=True)
+
+
+ro.r('current_las_pretreated <- NULL')
+
+
 def preprocess_with_fPCpretreatment(laz_file, WD=600.0, LMA=100.0):
     """
     Preprocess LAZ file using the official fPCpretreatment function from LidarForFuel.
@@ -56,6 +68,29 @@ def preprocess_with_fPCpretreatment(laz_file, WD=600.0, LMA=100.0):
     Returns:
     - Preprocessed LAS object ready for fCBDprofile_fuelmetrics
     """
+    laz_name = Path(laz_file).stem
+    
+    if laz_name.endswith('_pretreated'):
+        pretreated_path = PRETREATED_DIR / f"{laz_name}.laz"
+    else:
+        pretreated_path = PRETREATED_DIR / f"{laz_name}_pretreated.laz"
+    
+    if pretreated_path.exists():
+        print(f"  Found pretreated file at {pretreated_path}. Loading directly...")
+        try:
+            las_preprocessed = lidR.readLAS(str(pretreated_path))
+             # Check if loaded LAS is valid and not empty
+            ro.r.assign("temp_las", las_preprocessed)
+            is_empty = ro.r("is.empty(temp_las)")[0]
+            if not is_empty:
+                print(f"  Successfully loaded pretreated file.")
+                return las_preprocessed
+            else:
+                print("  Pretreated file was empty. Reprocessing...")
+        except Exception as e:
+             print(f"  Error loading pretreated file: {e}. Reprocessing...")
+
+    
     print(f"  Using official fPCpretreatment function...")
     
     try:
@@ -69,14 +104,18 @@ def preprocess_with_fPCpretreatment(laz_file, WD=600.0, LMA=100.0):
             H_strata_bush=2,   
             Height_filter=80   
         )
-        
+        if las_preprocessed is not None and not ro.r("is.null(las_preprocessed)")[0]:
+            print(f"  Saving pretreated file to {pretreated_path}...")
+            try:
+                lidR.writeLAS(las_preprocessed, str(pretreated_path))
+            except Exception as e:
+                print(f"  Warning: Could not save pretreated file: {e}")
+
         return las_preprocessed
         
     except Exception as e:
         print(f"  Error in fPCpretreatment: {e}")
         print(f"  Falling back to simplified preprocessing...")
-        
-
         las = lidR.readLAS(laz_file)
         return preprocess_inmemory_fallback(las, WD, LMA)
 
@@ -127,9 +166,9 @@ def preprocess_inmemory_fallback(las, WD=600.0, LMA=100.0):
     ''')
     return ro.r['preprocess_inmem'](las, WD, LMA)
 
-def calculate_metrics(las, **kwargs):
+def calculate_metrics(pixel_metric, **kwargs):
     """Calculate fuel metrics using LidarForFuel and add spatial info to profile"""
-    result = fCBDprofile_fuelmetrics(datatype=las, **kwargs)
+    result = fCBDprofile_fuelmetrics(datatype=pixel_metric, **kwargs)
     
     metrics_r = ro.r('`[[`')(result, 1)
     profile_r = ro.r('`[[`')(result, 2)
@@ -204,6 +243,65 @@ def calculate_metrics(las, **kwargs):
 
 
 
+def generate_pixel_metrics_grid(las, res=10.0, output_path=None, **kwargs):
+    """
+    Generate raster metrics for the entire point cloud using lidR::pixel_metrics
+    """
+    print(f"  Generating raster metrics grid (Resolution: {res}m)...")
+    ro.r('''
+    compute_grid <- function(las, res, wd, lma) {
+        library(lidR)
+        library(terra)
+        
+        # Ensure WD and LMA are present in LAS data if not already (safeguard)
+        # This handles cases where fPCpretreatment might not have added them, or scoping issues
+        if (is.null(las@data$WD)) { 
+            las@data$WD <- rep(wd, npoints(las)) 
+        }
+        if (is.null(las@data$LMA)) { 
+            las@data$LMA <- rep(lma, npoints(las)) 
+        }
+
+        # Call pixel_metrics with the formula
+        # We use WD=WD and LMA=LMA to refer to the columns in the LAS object
+        
+        metrics <- lidR::pixel_metrics(
+            las,
+            func = ~fCBDprofile_fuelmetrics(
+                datatype="Pixel",
+                X=X, Y=Y, Z=Z, Zref=Zref,
+                ReturnNumber=ReturnNumber,
+                Easting=Easting, Northing=Northing, Elevation=Elevation,
+                LMA=LMA, gpstime=gpstime,
+                WD=WD,
+                threshold=0.02,
+                limit_N_points=100,
+                omega=0.77,
+                d=1,
+                G=0.5
+            ),
+            res = res
+        )
+        return(metrics)
+    }
+    ''')
+    
+    try:
+        grid = ro.r['compute_grid'](las, res, kwargs.get('WD', 600.0), kwargs.get('LMA', 100.0))
+        
+        if output_path and grid is not ro.NULL:
+             # Save to TIF
+             ro.r.assign("temp_grid", grid)
+             ro.r.assign("temp_path", str(output_path))
+             ro.r('terra::writeRaster(temp_grid, temp_path, overwrite=TRUE)')
+             print(f"    Saved TIF to: {output_path}")
+             return True
+        return False
+        
+    except Exception as e:
+        print(f"    Error generating grid: {e}")
+        return False
+
 def run_pipeline(laz_files, output_dir='results', pixel_resolution=10.0, **kwargs):
     """Process LAZ files and generate metrics and plots"""
     
@@ -241,27 +339,25 @@ def run_pipeline(laz_files, output_dir='results', pixel_resolution=10.0, **kwarg
             if las_processed == ro.NULL:
                 print("  Skipping file: Preprocessing failed and returned an empty point cloud.")
                 continue
+            tif_name = filename.replace('.laz', '_fuel_metrics.tif')
+            tif_path = output_path / tif_name
             
-            print("  Calculating metrics...")
-            profile, metrics = calculate_metrics(las_processed, **kwargs)
-
-
-            csv_name = filename.replace('.laz', '_profile.csv')
-            csv_path = output_path / csv_name
-            profile.to_csv(csv_path, index=False)
-            print(f"    Saved profile to: {csv_name}")
-
-            metrics['filename'] = filename
-            all_metrics.append(metrics)
-
-            all_profiles.append(profile)
-            all_filenames.append(filename)
+            success = generate_pixel_metrics_grid(
+                las_processed, 
+                res=pixel_resolution, 
+                output_path=tif_path,
+                **kwargs
+            )
+            
+            if success:
+                print(f"  Successfully processed {filename}")
+            else:
+                print(f"  Failed to generate metrics for {filename}")
             
         except Exception as e:
             print(f"  Error: {e}\n")
             continue
-    
-    # Save all metrics to a single CSV file
+
     if all_metrics:
         metrics_df = pd.DataFrame(all_metrics)
         metrics_path = output_path / 'all_metrics.csv'

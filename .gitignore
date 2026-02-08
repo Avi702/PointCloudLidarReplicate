@@ -18,3 +18,5 @@ cbd_images/
 best_model.pth
 HHDC/
 cbd_arrays/
+test.py
+

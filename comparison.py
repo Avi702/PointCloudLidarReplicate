@@ -120,8 +120,7 @@ def create_cropped_comparison(csv_path, tensor_chm, center_coordinates, crop_siz
 
  
     
-    height_threshold = 1 # 10% of the CBH
-    grid_cbd[grid_height <= height_threshold] = 0
+
     grid_cbd = filter_percentiles(grid_cbd, [2, 98])
 
 

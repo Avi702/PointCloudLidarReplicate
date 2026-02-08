@@ -169,7 +169,11 @@ fPCpretreatment <- function(
   X <- Z <- Classification <- NULL
 
   # read chunk
-  las <- lidR::readLAS(chunk)
+  if (inherits(chunk, "LAS")) {
+    las <- chunk
+  } else {
+    las <- lidR::readLAS(chunk)
+  }
   # TODO: filter virtual points, cf virtual classes in lidar-hd specs
   las <- filter_seasons(las, season_filter, plot_hist_days = plot_hist_days)
   las <- filter_date_mode(las, deviation_days, plot_hist_days = plot_hist_days)
