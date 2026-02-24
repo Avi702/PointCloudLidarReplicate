@@ -11,7 +11,7 @@ import re
 SUB_CUBE_SPATIAL_SIDE_SIZE = 200  
 PIXEL_RESOLUTION = 1.0             
 HHDC_DIR = "/Users/avnee/PointCloudLidarReplicate/HHDC"
-LAZ_DIR = "/Users/avnee/PointCloudLidarReplicate/NEON" 
+LAZ_DIR = "/Users/avnee/PointCloudLidarReplicate/NEON_1" 
 OUTPUT_ARRAY_DIR = "/Users/avnee/PointCloudLidarReplicate/cbd_arrays"
 OUTPUT_IMAGE_DIR = "/Users/avnee/PointCloudLidarReplicate/cbd_images"
 OUTPUT_PRETREATED_DIR = "/Users/avnee/PointCloudLidarReplicate/pretreated"

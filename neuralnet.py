@@ -18,35 +18,77 @@ random_hhdc = np.random.choice(hhdcs_files, 1)[0]
 print(f"Selected File: {random_hhdc}")
 
 hhdc_hr = np.load(random_hhdc)['arr_0']
+
+
 class MyCNN(nn.Module):
     def __init__(self):
         super(MyCNN, self).__init__()
-        self.conv1 = nn.Conv2d(in_channels=128, out_channels=64, kernel_size=3, padding=1)
-        self.relu1 = nn.ReLU()
-        self.conv2 = nn.Conv2d(in_channels=64, out_channels=32, kernel_size=3, padding=1)
-        self.relu2 = nn.ReLU()
-        self.conv3 = nn.Conv2d(in_channels=32, out_channels=16, kernel_size=3, padding=1)
-        self.relu3 = nn.ReLU()
-        self.conv4 = nn.Conv2d(in_channels=16, out_channels=4, kernel_size=3, padding=1)
-        self.relu4 = nn.ReLU()
-        self.conv5 = nn.Conv2d(in_channels=4, out_channels=2, kernel_size=3, padding=1)
-        self.relu5 = nn.ReLU()
-        self.conv6 = nn.Conv2d(in_channels=2, out_channels=1, kernel_size=3, padding=1)
+        
+        # --- BLOCK 1: 128 -> 64 channels (Residual) ---
+        self.conv1 = nn.Conv2d(128, 64, kernel_size=3, padding=1)
+        self.bn1 = nn.BatchNorm2d(64)
+        # 1x1 Conv to match channels for the skip connection
+        self.skip1 = nn.Conv2d(128, 64, kernel_size=1) 
+        self.lrelu1 = nn.LeakyReLU(negative_slope=0.01)
+        
+        # --- BLOCK 2: 64 -> 32 channels (Residual) ---
+        self.conv2 = nn.Conv2d(64, 32, kernel_size=3, padding=1)
+        self.bn2 = nn.BatchNorm2d(32)
+        # 1x1 Conv to match channels for the skip connection
+        self.skip2 = nn.Conv2d(64, 32, kernel_size=1)
+        self.lrelu2 = nn.LeakyReLU(negative_slope=0.01)
+        
+        # --- BLOCK 3: 32 -> 16 channels (Residual) ---
+        self.conv3 = nn.Conv2d(32, 16, kernel_size=3, padding=1)
+        self.bn3 = nn.BatchNorm2d(16)
+        # 1x1 Conv to match channels for the skip connection
+        self.skip3 = nn.Conv2d(32, 16, kernel_size=1)
+        self.lrelu3 = nn.LeakyReLU(negative_slope=0.01)
+        
+        # --- Standard blocks for small features ---
+        # Block 4: 16 -> 4 channels
+        self.conv4 = nn.Conv2d(16, 4, kernel_size=3, padding=1)
+        self.bn4 = nn.BatchNorm2d(4)
+        self.lrelu4 = nn.LeakyReLU(negative_slope=0.01)
+        
+        # Block 5: 4 -> 2 channels
+        self.conv5 = nn.Conv2d(4, 2, kernel_size=3, padding=1)
+        self.bn5 = nn.BatchNorm2d(2)
+        self.lrelu5 = nn.LeakyReLU(negative_slope=0.01)
+        
+        # Block 6: Final 1-channel projection
+        self.conv6 = nn.Conv2d(2, 1, kernel_size=3, padding=1)
 
     def forward(self, x):
-        x = self.conv1(x)
-        x = self.relu1(x)
-        x = self.conv2(x)
-        x = self.relu2(x)
-        x = self.conv3(x)
-        x = self.relu3(x)
-        x = self.conv4(x)
-        x = self.relu4(x)
-        x = self.conv5(x)
-        x = self.relu5(x)
-        x = self.conv6(x)
-        return x
+        # Block 1 (Residual)
+        identity = self.skip1(x)       # Project input to 64 channels
+        out = self.conv1(x)
+        out = self.bn1(out)
+        out += identity                # Add Residual
+        x = self.lrelu1(out)           # Activation after addition
 
+        # Block 2 (Residual)
+        identity = self.skip2(x)       # Project input to 32 channels
+        out = self.conv2(x)
+        out = self.bn2(out)
+        out += identity                # Add Residual
+        x = self.lrelu2(out)
+
+        # Block 3 (Residual)
+        identity = self.skip3(x)       # Project input to 16 channels
+        out = self.conv3(x)
+        out = self.bn3(out)
+        out += identity                # Add Residual
+        x = self.lrelu3(out)
+
+        # Remaining standard blocks
+        x = self.lrelu4(self.bn4(self.conv4(x)))
+        x = self.lrelu5(self.bn5(self.conv5(x)))
+        
+        # Final convolution
+        x = self.conv6(x)
+        
+        return x
 
 class ForestDataset(Dataset):
     def __init__(self, input_dir, target_dir):
@@ -83,8 +125,6 @@ class ForestDataset(Dataset):
         else:
             input_array = npz_data[npz_data.files[0]].astype(np.float32)
         
-        # Ensure channel first: (H, W, C) -> (C, H, W) OR (C, H, W) already?
-        # Standardize check: if last dim is 128, it's (H, W, C).
         if input_array.shape[-1] == 128:
              input_array = input_array.transpose(2, 0, 1) 
         
@@ -242,18 +282,18 @@ def visualize_results(model, dataloader):
     plt.title(title_text)
     plt.colorbar()
     plt.subplot(1, 3, 2)
-    plt.imshow(image_sample, cmap=custom_cmap)
+    plt.imshow(image_sample, cmap=custom_cmap, vmin=0.0,vmax=0.1)
     plt.title("Target (Ground Truth CBD)")
     plt.colorbar()
     plt.subplot(1, 3, 3)
-    plt.imshow(prediction_sample, cmap=custom_cmap)
+    plt.imshow(prediction_sample, cmap=custom_cmap, vmin=0.0,vmax=0.1)
     plt.title("Model Prediction")
     plt.colorbar()
     
     plt.show()
 
 if __name__ == "__main__":
-    dataloader = create_dataloader(input_dir, target_dir, batch_size=4) 
+    dataloader = create_dataloader(input_dir, target_dir, batch_size=64) 
     model = create_model()
     criterion = create_criterion()
     optimizer = create_optimizer(model)
@@ -261,10 +301,10 @@ if __name__ == "__main__":
     if os.path.exists('best_model.pth'):
         print("Using existing model to continue training...")
         model.load_state_dict(torch.load('best_model.pth'))
-    
+
     print("Starting training...")
     try:
-        training_loop(dataloader, model, criterion, optimizer, num_epochs=1000)
+        training_loop(dataloader, model, criterion, optimizer, num_epochs=200)
     except KeyboardInterrupt:
         print("\nTraining interrupted by user. Loading best model found so far...")
 
